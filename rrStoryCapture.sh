@@ -5,7 +5,7 @@
 ## The script relies on the freely-distributed tool wkhtmltopdf for the final conversion from html to pdf. If that step is not necessary then the dependency is unnecessary and those failed lines will not stop the rest of the script from running.
 # @Author: bcavanaugh
 # @Created: 9/18/19
-# @LastModified: 6/24/20
+# @LastModified: 9/12/20
 
 
 ### Planned improvements:
@@ -79,20 +79,38 @@ uniq toc_working/toBeTrimmed > toc_working/$tocFileName
 echo "Copying chapters from site to local directory: [${storyName}chapters]."
 if [ ! -d "${storyName}chapters" ]; then
 	mkdir "${storyName}chapters";
+fi
 
-	while read line; do
+while read line; do
+	nextChapterName="${storyName}chapters/chapter_${index}.html"
+	# TODO: Add a check to see if the whole file is less than 50 characters?
+	# TODO: Try and extract the chapter name?
+	# And do what with it?
+	# TODO: Add a flag that ignores this check and re-downloads all of the chapters regardless.
+	if [ -f $nextChapterName ]; then
+		# Echoing a blank line for clarity when logging...
+		echo "\n"
+		echo "Chapter number ${index} already exists and is saved under the file name ${nextChapterName}. It will not be re-downloaded."
+	else
+		# TODO: Make a listing of all of the exclusively new chapters. If they all exist at the end of the TOC, then we know they're all new. New chapters all get bundled into a single new volume.
+		# TODO: Make a command-line flag that controls whether the latest volume is completely recreated with the new chapters added or if a new volume is produced instead.
+			# Ex: If only 24 chapters were originally produced and now 35 exist the default behavior would be to completely recreate volume_1, however this flag would change the behavior so that chapters 25-35 would instead go into a new volume named volume_1.2
+
 		url=$toc_LinkRoot$line
 		# Echoing a blank line for clarity when logging...
 		echo "\n"
-		echo "Curling chapter #" $index "from url: $url"
-		
-		curl $url > "${storyName}chapters/chapter_${index}.html"
-		index=$((index+1))
-		chapterCount=$index
-	done < toc_working/$tocFileName
-fi
+		echo "Downloading chapter #${index} from the url: ${url} and saving it under the name ${nextChapterName}"
+
+		curl $url > $nextChapterName
+	fi
+
+	index=$((index+1))
+	chapterCount=$index
+done < toc_working/$tocFileName
 
 # TODO: Make this a value users can overwrite
+# WARNING: When using --update mode take care to always use the same value for chaptersPerFile. If an update is being made this tool assumes existing volumes already have the specified number of files. If, for example, 800 chapters were saved with each volume holding 50 chapters, and update is run with a new setting for 60 chapters per file, the tool will believe chapter 801 should go into volume 13, not 17. As a result every volume from 1 to 12 will have 50 sequential chapters, for with volume 12 ending at chapter 600. Then volume 13 will skip ahead to chapter 780. Also, depending on the number of new chapters, later volumes may or may not be overwritten at all. Such as if only chapters 801 to 810 were newly available. In that instance volume 13 would contain chapters 780 to 810, and then volumes 14 to 16 would still contain chapters 651 to 800.
+	# Note to self "--update mode" is a planned feature, one that will preserve existing volumes when new chapters are found and only update the ones missing them/generate new volumes as needed.
 let chaptersPerFile=50;
 let volumeNumber=$startVolumeNumber;
 let counter=0;
@@ -169,7 +187,7 @@ do
 	
 	echo "Parsing $file and piping it into "${outputDir}/${storyName}volume_${volumeNumber}.html""
 	
-	echo "${HTML_CHAPTER_TITLE_OPENING_TAG}Chapter $((counter+1))${HTML_CHAPTER_TITLE_CLOSING_TAG}" >> "${outputDir}/${storyName}volume_${volumeNumber}.html"
+	echo "${HTML_CHAPTER_TITLE_OPENING_TAG}Chapter $((counter+1))/${chaptersPerFile} ${HTML_CHAPTER_TITLE_CLOSING_TAG}" >> "${outputDir}/${storyName}volume_${volumeNumber}.html"
 	
 	grep "<title>Chapter [0-9]" $file >> "${outputDir}/${storyName}volume_${volumeNumber}.html"
 
