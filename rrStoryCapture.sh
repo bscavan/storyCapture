@@ -59,7 +59,19 @@ let firstNewChapter=0
 # example toc_URL: https://www.royalroad.com/fiction/14167/metaworld-chronicles
 toc_LinkRoot="https://www.royalroad.com"
 
+skipToc="false"
+skipChapters="false"
+
 recreateVolumes="false"
+redownloadChapters="false"
+
+# In RoyalRoad stories this text corresponds to the div that contains the chapter's content.
+chapterStartText="chapter-inner chapter-content"
+
+# In RoyalRoad stories this text corresponds to an Advertisement that shows up immediately after the chapter-content element ends.
+chapterEndText="bold uppercase text-center"
+
+fontSize=400
 
 let storyName
 
@@ -79,12 +91,45 @@ do
 		shift
 		;;
 		-n=*|--name=*)
-		storyName="${arg#*=}"
+		storyName="${arg#*=}_"
 		shift
 		;;
-		-r|--recreate)
+		-r|--recreate-volumes)
 		# recreates volume files regardless of whether or not their chapter files were found
 		recreateVolumes="true"
+		shift
+		;;
+		-a|--redownload-all)
+		# recreates chapter files regardless of whether or not they already exist in the chapters directory, and then recreates the resulting volumes with the new chapters.
+		redownloadChapters="true"
+		shift
+		;;
+		-t=*|--toc=*)
+		# A user-provided table-of-contents. Skips the step to download the TOC.
+		skipToc="true"
+		tocFileName="${arg#*=}"
+		shift
+		;;
+		-s|--skip-chapters)
+		# skip the toc-download and chapter-download steps. This uses an existing chapters directory for generating volumes.
+		skipToc="true"
+		skipChapters="true"
+		shift
+		;;
+		-f|--font-size=*)
+		# Overwrites the font size applied in the pdfs.
+		# Warning: this is still buggy.
+		fontSize="${arg#*=}"
+		shift
+		;;
+		--start-text=*)
+		# Overwrites the text used for finding the end of a filechapterEndText
+		chapterStartText="${arg#*=}"
+		shift
+		;;
+		--end-text=*)
+		# Overwrites the text used for finding the end of a filechapterEndText
+		chapterEndText="${arg#*=}"
 		shift
 		;;
 		*)
@@ -96,108 +141,121 @@ done
 
 ##### Main: ####
 
-if [[ ! -z "$storyName" ]]; then 
-  storyName=${storyName}"_"
-fi
-
-toc_URL=${toc_LinkRoot}${toc_Id}
-
 outputDir="./${storyName}output"
 
-#TODO: Check the first and last characters of toc_Id for a /. If they aren't there then add them.
 
-mkdir toc_working
-#TODO: remove this directory when we are done...
+############### Section for downloading TOC. 
+if [[ $skipToc = "false" ]]; then
+	toc_URL=${toc_LinkRoot}${toc_Id}
+	#TODO: Check the first and last characters of toc_Id for a /. If they aren't there then add them.
 
-echo "curling $toc_URL to access table of contents for story."
-curl $toc_URL > toc_working/tocInProgress
+	mkdir toc_working
+	#TODO: remove this directory when we are done...
 
-grep $toc_Id toc_working/tocInProgress > toc_working/toBeTrimmed
+	echo "curling $toc_URL to access table of contents for story."
+	curl $toc_URL > toc_working/tocInProgress
 
-echo "Stripping out illegal characters from ToC file."
+	grep $toc_Id toc_working/tocInProgress > toc_working/toBeTrimmed
 
-# Strips out html tags from the document.
-sed -i 's/<tr style="cursor: pointer" data-url="//g' toc_working/toBeTrimmed
-sed -i 's/<a href="//g' toc_working/toBeTrimmed
-sed -i 's/<a class="//g' toc_working/toBeTrimmed
-sed -i 's/">//g' toc_working/toBeTrimmed
+	echo "Stripping out illegal characters from ToC file."
 
-# Strips out all spaces.
-sed -i 's/ //g' toc_working/toBeTrimmed
+	# Strips out html tags from the document.
+	sed -i 's/<tr style="cursor: pointer" data-url="//g' toc_working/toBeTrimmed
+	sed -i 's/<a href="//g' toc_working/toBeTrimmed
+	sed -i 's/<a class="//g' toc_working/toBeTrimmed
+	sed -i 's/">//g' toc_working/toBeTrimmed
 
-# Trims off the first 2 lines. These are usually present, always garbage when they show up, and the good links always come in sets of threes, so we're safe to trim of them.
-sed -i 1,2d toc_working/toBeTrimmed
+	# Strips out all spaces.
+	sed -i 's/ //g' toc_working/toBeTrimmed
 
-# Trims off the last line. This is the always-present "reviews" link. Also, usable links always show up in sets of threes, so we're safe to remove it.
-sed -i '$ d' toc_working/toBeTrimmed
+	# Trims off the first 2 lines. These are usually present, always garbage when they show up, and the good links always come in sets of threes, so we're safe to trim of them.
+	sed -i 1,2d toc_working/toBeTrimmed
 
-echo "De-duplicate filtering ToC"
-uniq toc_working/toBeTrimmed > toc_working/$tocFileName
+	# Trims off the last line. This is the always-present "reviews" link. Also, usable links always show up in sets of threes, so we're safe to remove it.
+	sed -i '$ d' toc_working/toBeTrimmed
 
-#TODO: Preface the chapters, toc_working, and output directories with a title param passed in by the user-parameter
-# to identifiy the story.
-echo "Copying chapters from site to local directory: [${storyName}chapters]."
-if [ ! -d "${storyName}chapters" ]; then
-	mkdir "${storyName}chapters";
+	echo "De-duplicate filtering ToC"
+	uniq toc_working/toBeTrimmed > toc_working/$tocFileName
 fi
 
-while read line; do
-	nextChapterName="${storyName}chapters/chapter_${index}.html"
-	# TODO: Add a check to see if the whole file is less than 50 characters?
-	# TODO: Try and extract the chapter name?
-	# And do what with it?
-	# TODO: Add a flag that ignores this check and re-downloads all of the chapters regardless.
-	if [ -f $nextChapterName ]; then
-		# Echoing a blank line for clarity when logging...
-		echo "\n"
-		echo "Chapter number ${index} already exists and is saved under the file name ${nextChapterName}. It will not be re-downloaded."
-	else
-		if [ $firstNewChapter -lt 0 ]; then
-			#echo "The first new chapter found was: $firstNewChapter, and it is now being set to $index"
-			firstNewChapter=$index
-		fi
-		# TODO: Make a listing of all of the exclusively new chapters. If they all exist at the end of the TOC, then we know they're all new. New chapters all get bundled into a single new volume.
-		# TODO: Make a command-line flag that controls whether the latest volume is completely recreated with the new chapters added or if a new volume is produced instead.
-			# Ex: If only 24 chapters were originally produced and now 35 exist the default behavior would be to completely recreate volume_1, however this flag would change the behavior so that chapters 25-35 would instead go into a new volume named volume_1.2
+################ Section for downloading chapter files:
 
-		url=$toc_LinkRoot$line
-		# Echoing a blank line for clarity when logging...
-		echo "\n"
-		echo "Downloading chapter #${index} from the url: ${url} and saving it under the name ${nextChapterName}"
-
-		curl $url > $nextChapterName
+if [[ $skipChapters = "true" ]]; then
+	firstNewChapter=1
+else
+	#TODO: Preface the chapters, toc_working, and output directories with a title param passed in by the user-parameter
+	# to identifiy the story.
+	echo "Copying chapters from site to local directory: [${storyName}chapters]."
+	if [ ! -d "${storyName}chapters" ]; then
+		mkdir "${storyName}chapters";
 	fi
 
-	index=$((index+1))
-	chapterCount=$index
-done < toc_working/$tocFileName
+	while read line; do
+		nextChapterName="${storyName}chapters/chapter_${index}.html"
+		# TODO: Add a check to see if the whole file is less than 50 characters?
+		# TODO: Try and extract the chapter name from the url?
+		# And do what with it?
+		if [[ $redownloadChapters = "false" ]] && [ -f $nextChapterName ]; then
+			# Echoing a blank line for clarity when logging...
+			echo "\n"
+			echo "Chapter number ${index} already exists and is saved under the file name ${nextChapterName}. It will not be re-downloaded."
+		else
+			if [ $firstNewChapter -lt 0 ]; then
+				#echo "The first new chapter found was: $firstNewChapter, and it is now being set to $index"
+				firstNewChapter=$index
+			fi
+			# TODO: Make a command-line flag that controls whether the latest volume is completely recreated with the new chapters added or if a new volume is produced instead.
+				# Ex: If only 24 chapters were originally produced and now 35 exist the default behavior would be to completely recreate volume_1, however this flag would change the behavior so that chapters 25-35 would instead go into a new volume named volume_1.2
+
+			# The url begins with the link root and ends with the first space in the current line. Anything after that is cut off.
+			url=${toc_LinkRoot}$(echo $line | cut -f1 -d' ')
+
+			# Echoing a blank line for clarity when logging...
+			echo "\n"
+			echo "Downloading chapter #${index} from the url: ${url} and saving it under the name ${nextChapterName}"
+
+			curl $url > $nextChapterName
+		fi
+
+		index=$((index+1))
+		chapterCount=$index
+	done < toc_working/$tocFileName
+fi
 
 # TODO: Make this a value users can overwrite
 # WARNING: When using --update mode take care to always use the same value for chaptersPerFile. If an update is being made this tool assumes existing volumes already have the specified number of files. If, for example, 800 chapters were saved with each volume holding 50 chapters, and update is run with a new setting for 60 chapters per file, the tool will believe chapter 801 should go into volume 13, not 17. As a result every volume from 1 to 12 will have 50 sequential chapters, for with volume 12 ending at chapter 600. Then volume 13 will skip ahead to chapter 780. Also, depending on the number of new chapters, later volumes may or may not be overwritten at all. Such as if only chapters 801 to 810 were newly available. In that instance volume 13 would contain chapters 780 to 810, and then volumes 14 to 16 would still contain chapters 651 to 800.
 	# Note to self "--update mode" is a planned feature, one that will preserve existing volumes when new chapters are found and only update the ones missing them/generate new volumes as needed.
+		# Alternatively, whenever we allow users to specify a new volume size, force it to recreate the volumes.
 let chaptersPerFile=50;
 
 echo "/n"
+
+if [[ $recreateVolumes = "true" ]]; then
+	firstNewChapter=1
+fi
+
 echo "The first new chapter found was $firstNewChapter"
 
-## TODO: Add a command-line flag to this script that, when provided, sets firstNewChapter to 1. That will force the recreation of all volumes.
-
 # If the variable firstNewChapter has not been set then no new chapters were found.
-if [[ $recreateVolumes = "false" ]] && [ $firstNewChapter -lt 0 ]; then
+if [ $firstNewChapter -lt 0 ]; then
 	echo "No new chapters were found. Therefore, no volumes need to be created."
 	exit 0;
 else
 	chaptersPerFile=$(max $chaptersPerFile 1)
 
-	# Divide the new chapter by the number of chapters per volume and preserve the decimal places.
-	startVolumeNumber=$(decimal_divide $firstNewChapter $chaptersPerFile)
+	if [ $firstNewChapter -lt $chaptersPerFile ]; then
+		startVolumeNumber=1
+	else
+		# Divide the new chapter by the number of chapters per volume and preserve the decimal places.
+		startVolumeNumber=$(decimal_divide $firstNewChapter $chaptersPerFile)
 
-	# Round that number up to the nearest value.
-	startVolumeNumber=$(echo $startVolumeNumber | awk '{print int($1+0.5)}')
+		# Round that number up to the nearest value.
+		startVolumeNumber=$(echo $startVolumeNumber | awk '{print int($1+0.5)}')
 
-	# Ensure that value is at least 1.
-	startVolumeNumber=$(max $startVolumeNumber 1)
-	echo "The first volume that contains new chapters will be $startVolumeNumber"
+		# Ensure that value is at least 1.
+		startVolumeNumber=$(max $startVolumeNumber 1)
+		echo "The first volume that contains new chapters will be $startVolumeNumber"
+	fi
 
 	((startChapter = (startVolumeNumber - 1) * 50 + 1))
 	#startChapter=$(max $startChapter 1)
@@ -211,8 +269,7 @@ mkdir $outputDir
 
 #Appends the opening HTML tags to the first volume file.
 HTML_OPENING_TAGS="<!DOCTYPE html> <html> <head> </head> <body>"
-# TODO: Make a param for controlling this value.
-HTML_FONT_SIZE_VALUE=400
+HTML_FONT_SIZE_VALUE=$fontSize
 HTML_STYLE_TAG="<style>p { font-size: "$HTML_FONT_SIZE_VALUE"%}</style>"
 HTML_CHAPTER_TITLE_OPENING_TAG="<h1>"
 HTML_CHAPTER_TITLE_CLOSING_TAG="</h1>"
@@ -231,7 +288,7 @@ echo "About to loop over all of the files in ./${storyName}chapters/, from chapt
 for (( currentChapter=$startChapter; currentChapter<=$chapterCount; currentChapter++ ))
 do
 	file="./${storyName}chapters/chapter_${currentChapter}.html"
-	if (( $counter >= $chaptersPerFile)); then
+	if (( $counter > $chaptersPerFile)); then
 		echo "Reached chapter ${counter} out of ${chaptersPerFile} for volume number ${volumeNumber}. Finalizing volume now."
 
 		#Appends the ending HTML tags to the previous volume file.
@@ -278,10 +335,13 @@ do
 	
 	grep "<title>Chapter [0-9]" $file >> "${outputDir}/${storyName}volume_${volumeNumber}.html"
 
-	# line1 corresponds to the div that contains the chapter's content.
-	line1=$(grep -n "chapter-inner chapter-content" $file | cut -f1 -d:)
-	# line2 corresponds to an Advertisement that shows up immediately after the chapter-content element ends.
-	line2=$(grep -n "bold uppercase text-center" $file | cut -f1 -d:)
+	# line1 is where the chapter's content starts.
+	line1=$(grep -n "$chapterStartText" $file | head -n 1 | cut -f1 -d:)
+	#echo "Chapter ${counter} begins at line: $line1"
+
+	# line2 is where the chapter's content ends.
+	line2=$(grep -n "$chapterEndText" $file | head -n 1 | cut -f1 -d:)
+	#echo "Chapter ${counter} ends at line: $line2"
 
 	# Notice: this is a non-inclusive match (at least as far as line2 goes). This means we're successfully snipping out the advertisements element on line2!
 	# We are appending the found text to the current volume file
