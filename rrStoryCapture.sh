@@ -5,7 +5,7 @@
 ## The script relies on the freely-distributed tool wkhtmltopdf for the final conversion from html to pdf. If that step is not necessary then the dependency is unnecessary and those failed lines will not stop the rest of the script from running.
 # @Author: bcavanaugh
 # @Created: 9/18/19
-# @LastModified: 9/12/20
+# @LastModified: 10/12/20
 
 
 ### Planned improvements:
@@ -19,6 +19,9 @@
 # Params for overwriting the root url and search strings?
 # A param for changing the font-size style in the resulting HTML.
 
+
+##### Helper functions: #####
+
 # Returns the greater of two numbers provided.
 max () {
 	a=$1
@@ -28,12 +31,15 @@ max () {
 	return $output
 }
 
+# Simulates decimal division between two numbers
 decimal_divide () {
 	numerator=$1
 	denominator=$2
 	RESULT=$((${numerator}00/$denominator))
 	echo "${RESULT:0:-2}.${RESULT: -2}"
 }
+
+##### Parameters #####
 
 # This normally starts at zero.
 # TODO: Make a step that counts the number of files in "chapters" and sets this value to the result...
@@ -50,23 +56,55 @@ chapterCount=$startChapter;
 let firstNewChapter=0
 ((firstNewChapter = 0 - 1))
 
+# example toc_URL: https://www.royalroad.com/fiction/14167/metaworld-chronicles
 toc_LinkRoot="https://www.royalroad.com"
-toc_Id=$1
-toc_URL=$toc_LinkRoot$toc_Id
+
+recreateVolumes="false"
 
 let storyName
-## TODO: Check $2. If it is populated then set storyName="$2-"
-if [[ ! -z "$2" ]]; then 
-  storyName=${2}"_"
+
+# TODO: Add a help option...
+
+# Loop through arguments and process them
+for arg in "$@"
+do
+	case $arg in
+		-l=*|--link-root=*)
+		toc_LinkRoot="${arg#*=}"
+		shift
+		;;
+		-i=*|--id=*)
+		# example toc_Id: /fiction/14167/metaworld-chronicles/
+		toc_Id="${arg#*=}"
+		shift
+		;;
+		-n=*|--name=*)
+		storyName="${arg#*=}"
+		shift
+		;;
+		-r|--recreate)
+		# recreates volume files regardless of whether or not their chapter files were found
+		recreateVolumes="true"
+		shift
+		;;
+		*)
+		OTHER_ARGUMENTS+=("$1")
+		shift # Remove generic argument from processing
+		;;
+	esac
+done
+
+##### Main: ####
+
+if [[ ! -z "$storyName" ]]; then 
+  storyName=${storyName}"_"
 fi
+
+toc_URL=${toc_LinkRoot}${toc_Id}
 
 outputDir="./${storyName}output"
 
-# example toc_Id: /fiction/14167/metaworld-chronicles/
-# example toc_URL: https://www.royalroad.com/fiction/14167/metaworld-chronicles
-
 #TODO: Check the first and last characters of toc_Id for a /. If they aren't there then add them.
-
 
 mkdir toc_working
 #TODO: remove this directory when we are done...
@@ -145,7 +183,7 @@ echo "The first new chapter found was $firstNewChapter"
 ## TODO: Add a command-line flag to this script that, when provided, sets firstNewChapter to 1. That will force the recreation of all volumes.
 
 # If the variable firstNewChapter has not been set then no new chapters were found.
-if [ $firstNewChapter -lt 0 ]; then
+if [[ $recreateVolumes = "false" ]] && [ $firstNewChapter -lt 0 ]; then
 	echo "No new chapters were found. Therefore, no volumes need to be created."
 	exit 0;
 else
@@ -220,7 +258,7 @@ do
 		echo "Creating pdf from volume #"$volumeNumber
 		# TODO: Make this a relative path, an actual command, or just a parameter...
 		# TODO: Make this an optional step, controlled by a user-parameter
-		/c/Program\ Files/wkhtmltopdf/bin/wkhtmltopdf.exe "${outputDir}/${storyName}volume_${volumeNumber}.html" volume_$volumeNumber.pdf
+		/c/Program\ Files/wkhtmltopdf/bin/wkhtmltopdf.exe "${outputDir}/${storyName}volume_${volumeNumber}.html" ${storyName}volume_$volumeNumber.pdf
 
 		volumeNumber=$((volumeNumber+1));
 		# FIXME: Make counter start at 1, make this loop run while counter <= chaptersPerFile and remove the places where I'm logging counter + 1
