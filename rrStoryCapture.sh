@@ -340,7 +340,7 @@ echo "Combining chapter contents into logical html volumes and then converting t
 echo $HTML_OPENING_TAGS $HTML_STYLE_TAG > "${outputDir}/${storyName}volume_${volumeNumber}.html"
 
 ## Setting chapter count here, unfortunately as a string...
-chapterCount=$(ls ${storyName}chapters | wc -l)
+chapterCount=$(ls ${storyName}chapters/chapter_*.html | wc -l)
 ## Converting chapterCount back into an integer here...
 chapterCount=$(($chapterCount + 0))
 
