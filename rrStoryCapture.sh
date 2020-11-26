@@ -47,7 +47,8 @@ startChapter=0
 # This normally starts at zero.
 # TODO: Make a step that counts the number of files in "output" and sets this value to the result...
 let startVolumeNumber=1
-tocFileName="final-latest";
+# TODO: Determine if I want to preserve the toc in with the chapters. Since I can make HashMaps, keeping this around might let me determine if chapters ever disappear. Ex: When the author decides they want to publish book 1, but starts putting chapters from book 2 onto the same RoyalRoad fiction.
+tocFileName="toc_working/final-latest";
 
 let index=$startChapter+1;
 chapterCount=$startChapter;
@@ -65,11 +66,25 @@ skipChapters="false"
 recreateVolumes="false"
 redownloadChapters="false"
 
+firstLineInclusive="false"
+lastLineInclusive="false"
+
 # In RoyalRoad stories this text corresponds to the div that contains the chapter's content.
 chapterStartText="chapter-inner chapter-content"
 
 # In RoyalRoad stories this text corresponds to an Advertisement that shows up immediately after the chapter-content element ends.
 chapterEndText="bold uppercase text-center"
+
+# In the event that chapterEndText can't be found, this value is used instead.
+# This (totally not a hack) solution was added because some sites (Reign of Hunters) change their formatting midway through...
+# Overwrites the text used for finding the end of a filechapterEndText
+backupEndText="Previous Chapter"
+
+# TODO: Add comments explaining these two values...
+# Also mention that they overwrite --lastLineInclusive and --firstLineInclusive if they are set.
+firstLineOffset=0
+lastLineOffset=0
+backupEndLineOffset=0
 
 fontSize=400
 
@@ -96,6 +111,7 @@ do
 		;;
 		-r|--recreate-volumes)
 		# recreates volume files regardless of whether or not their chapter files were found
+		# Defaults to false if not set here.
 		recreateVolumes="true"
 		shift
 		;;
@@ -127,9 +143,39 @@ do
 		chapterStartText="${arg#*=}"
 		shift
 		;;
+		--first-line-inclusive)
+		# causes the scritp to treat chapterStartText as the first line of the chapter instead of the line one before it starts.
+		firstLineInclusive="true"
+		shift
+		;;
+		--last-line-inclusive)
+		# causes the scritp to treat filechapterEndText as the last line of the chapter instead of the line one after it ends.
+		lastLineInclusive="true"
+		shift
+		;;
+		--first-line-offset=*)
+		# TODO: Documentation
+		firstLineOffset="${arg#*=}"
+		shift
+		;;
+		--last-line-offset=*)
+		# TODO: Documentation
+		lastLineOffset="${arg#*=}"
+		shift
+		;;
+		--backup-end-line-offset=*)
+		# TODO: Documentation
+		backupEndLineOffset="${arg#*=}"
+		shift
+		;;
 		--end-text=*)
 		# Overwrites the text used for finding the end of a filechapterEndText
 		chapterEndText="${arg#*=}"
+		shift
+		;;
+		--backup-end-text=*)
+		# Overwrites the text used for finding the end of a backupEndText
+		backupEndText="${arg#*=}"
 		shift
 		;;
 		*)
@@ -139,10 +185,24 @@ do
 	esac
 done
 
+# If firstLineInclusive was set and firstLineOffset was not set then set firstLineOffset to -1.
+if [[ $firstLineOffset -eq 0 && $firstLineInclusive = "true" ]]; then
+	# If the pattern for the "start text" is actually the first line and not the line one before the first, we want to decrease $line1 by 1 so the last line will be kept.
+	firstLineOffset=-1
+	echo "firstLineInclusive was true. New value for the starting line of the chapter is: [$line2]"
+fi
+
+# Commented-out while trying to work-in handling for backupEndText... (It needs a different offset)
+# If lastLineInclusive was set and lastLineOffset was not set then set lastLineOffset to 1.
+if [[ $lastLineOffset -eq 0 && $lastLineInclusive = "true" ]]; then
+	# If the pattern for the "end text" is actually the last line and not the line one after the end, we want to increase $line2 by 1 so the last line will be kept.
+	lastLineOffset=1
+	echo "lastLineInclusive was true. New value for the ending line of the chapter is: [$line2]"
+fi
+
 ##### Main: ####
 
 outputDir="./${storyName}output"
-
 
 ############### Section for downloading TOC. 
 if [[ $skipToc = "false" ]]; then
@@ -175,7 +235,7 @@ if [[ $skipToc = "false" ]]; then
 	sed -i '$ d' toc_working/toBeTrimmed
 
 	echo "De-duplicate filtering ToC"
-	uniq toc_working/toBeTrimmed > toc_working/$tocFileName
+	uniq toc_working/toBeTrimmed > $tocFileName
 fi
 
 ################ Section for downloading chapter files:
@@ -219,7 +279,7 @@ else
 
 		index=$((index+1))
 		chapterCount=$index
-	done < toc_working/$tocFileName
+	done < $tocFileName
 fi
 
 # TODO: Make this a value users can overwrite
@@ -337,11 +397,24 @@ do
 
 	# line1 is where the chapter's content starts.
 	line1=$(grep -n "$chapterStartText" $file | head -n 1 | cut -f1 -d:)
-	#echo "Chapter ${counter} begins at line: $line1"
+	echo "Chapter ${counter} begins at line: [$line1]"
 
-	# line2 is where the chapter's content ends.
-	line2=$(grep -n "$chapterEndText" $file | head -n 1 | cut -f1 -d:)
-	#echo "Chapter ${counter} ends at line: $line2"
+	line1=$(($line1 - $firstLineOffset))
+
+	# If chapterEndText exists within the file, set line2 to the line number where it first appears.
+	if [[ $(grep -n "$chapterEndText" $file) ]]; then
+		# line2 is where the chapter's content ends.
+		line2=$(grep -n "$chapterEndText" $file | head -n 1 | cut -f1 -d:)
+		line2=$(($line2 - $lastLineOffset))
+		echo "Chapter ${counter} ends at line: [$line2]"
+	else
+		# If chapterEndText does not exist within the file, use backupEndText instead of chapterEndText to determine where the chapter text ends.
+		line2=$(grep -n "$backupEndText" $file | head -n 1 | cut -f1 -d:)
+		line2=$(($line2 - $backupEndLineOffset))
+		echo "Chapter ${counter} ends at line: [$line2]"
+	fi
+
+	#line2=$(($line2 - $lastLineOffset))
 
 	# Notice: this is a non-inclusive match (at least as far as line2 goes). This means we're successfully snipping out the advertisements element on line2!
 	# We are appending the found text to the current volume file
