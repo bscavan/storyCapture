@@ -323,6 +323,7 @@ if [ $firstNewChapter -lt 0 ]; then
 	echo "No new chapters were found. Therefore, no volumes need to be created."
 	exit 0;
 else
+	# FIXME: This section isn't working...
 	chaptersPerFile=$(max $chaptersPerFile 1)
 
 	if [ $firstNewChapter -lt $chaptersPerFile ]; then
@@ -366,12 +367,26 @@ chapterCount=$(ls ${storyName}chapters/chapter_*.html | wc -l)
 ## Converting chapterCount back into an integer here...
 chapterCount=$(($chapterCount + 0))
 
+# This line uses integer division to determine the last volume that will have $chaptersPerFile number of chapters. (Bash uses integer division, so the decimal value is stripped off here.).
+lastCompleteVolume=$(($chapterCount / $chaptersPerFile))
+# Now that the decimal value has been removed, re-multiplying by $chaptersPerFile produces the number of volumes that will be "complete" (they will have $chaptersPerFile number of chapters).
+lastChapterInACompleteVolume=$(($lastCompleteVolume * $chaptersPerFile))
+# This is the number of chapters that will appear in the last volume if it is an "incomplete" volume (one with fewer than $chapterCount chapters). If no chapters would be left to go into an "incomplete" volume then this value will be zero. 
+# Note, mathematically speaking, $lastChapterInACompleteVolume cannot be greater than $chapterCount. It can only be fewer or equal. If it is fewer then $chapterCountOfIncompleteVolume will be used for the length of the last chapter. If it is equal then $chaptersPerFile will be used instead.
+chapterCountOfIncompleteVolume=$(($chapterCount - $lastChapterInACompleteVolume))
+
 echo "About to loop over all of the files in ./${storyName}chapters/, from chapter_ ${startChapter}.html to ${chapterCount}.html"
 for (( currentChapter=$startChapter; currentChapter<=$chapterCount; currentChapter++ ))
 do
+	let chaptersInThisVolume=$chaptersPerFile
+
+	if (( $currentChapter > $chapterCountOfIncompleteVolume )); then
+		chaptersInThisFile=$chapterCountOfIncompleteVolume
+	fi
+	
 	file="./${storyName}chapters/chapter_${currentChapter}.html"
-	if (( $counter > $chaptersPerFile)); then
-		echo "While constructing volume number [${volumeNumber}], [${chaptersPerFile}] out of [${chaptersPerFile}] chapters were included. The volume will now be finalized and chapter number [${counter}] will be included in the next volume."
+	if (( $counter > $chaptersInThisVolume)); then
+		echo "While constructing volume number [${volumeNumber}], [${chaptersInThisVolume}] out of [${chaptersInThisVolume}] chapters were included. The volume will now be finalized and chapter number [${counter}] will be included in the next volume."
 
 		currentOutputFileName="${outputDir}/${storyName}volume_${volumeNumber}.html"
 
@@ -394,17 +409,14 @@ do
 
 		echo "Resetting internal counter to ${counter} and beginning volume number ${volumeNumber}"
 	else 
-		echo "Parsing content from chapter ${counter} out of ${chaptersPerFile} for volume number ${volumeNumber}"
+		echo "Parsing content from chapter ${counter} out of ${chaptersInThisVolume} for volume number ${volumeNumber}"
 	fi
 
 	currentOutputFileName="${outputDir}/${storyName}volume_${volumeNumber}.html"
 	echo "Parsing ${file} and piping it into ${currentOutputFileName}"
 
-	# TODO: Determine if we have a full volume here. If not, don't show the current chapter as ${counter}/${chaptersPerFile}, but instead show it as ${counter}/<chapters in the current volume>
-	# Given: we know $currentChapter, $chapterCount, $volumeNumber, and ${chaptersPerFile}
+	echo "${HTML_CHAPTER_TITLE_OPENING_TAG}Chapter ${counter}/${chaptersInThisVolume} ${HTML_CHAPTER_TITLE_CLOSING_TAG}" >> "${currentOutputFileName}"
 
-	echo "${HTML_CHAPTER_TITLE_OPENING_TAG}Chapter ${counter}/${chaptersPerFile} ${HTML_CHAPTER_TITLE_CLOSING_TAG}" >> "${currentOutputFileName}"
-	
 	grep "<title>Chapter [0-9]" $file >> "${currentOutputFileName}"
 
 	# line1 is where the chapter's content starts.
