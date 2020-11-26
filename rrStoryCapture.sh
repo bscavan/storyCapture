@@ -39,6 +39,28 @@ decimal_divide () {
 	echo "${RESULT:0:-2}.${RESULT: -2}"
 }
 
+# Uses sed to replace characters that wkhtmltopdf can't translate with ones that it can.
+replace_invalid_chars () {
+	fileName=$1
+
+	# Replace the the text "title>" with "h1>" in the previous volume
+	sed -i 's/title>/h1>/g' "${fileName}"
+
+	#TODO: Make this sed work on either (make a character set?)
+	# Replace all left-side quotation marks (“) with vertical quotes.
+	sed -i 's/“/"/g' "${fileName}"
+	# Replace all right-side quotation marks (”) with vertical quotes.
+	sed -i 's/”/"/g' "${fileName}"
+
+	# Replaces all left-side single-quote marks (‘) with a vertical single-quote.
+	sed -i 's/‘/'"'"'/g' "${fileName}"
+	# Replaces all right-side single-quote marks (’) with a vertical single-quote.
+	sed -i 's/’/'"'"'/g' "${fileName}"
+
+	# Replaces all elipse marks (…) with three period marks.
+	sed -i 's/…/.../g' "${fileName}"
+}
+
 ##### Parameters #####
 
 # This normally starts at zero.
@@ -349,51 +371,41 @@ for (( currentChapter=$startChapter; currentChapter<=$chapterCount; currentChapt
 do
 	file="./${storyName}chapters/chapter_${currentChapter}.html"
 	if (( $counter > $chaptersPerFile)); then
-		echo "Reached chapter ${counter} out of ${chaptersPerFile} for volume number ${volumeNumber}. Finalizing volume now."
+		echo "While constructing volume number [${volumeNumber}], [${chaptersPerFile}] out of [${chaptersPerFile}] chapters were included. The volume will now be finalized and chapter number [${counter}] will be included in the next volume."
+
+		currentOutputFileName="${outputDir}/${storyName}volume_${volumeNumber}.html"
 
 		#Appends the ending HTML tags to the previous volume file.
-		echo $HTML_CLOSING_TAGS >> "${outputDir}/${storyName}volume_${volumeNumber}.html"
+		echo $HTML_CLOSING_TAGS >> "${currentOutputFileName}"
 
-		# Replace the the text "title>" with "h1>" in the previous volume
-		sed -i 's/title>/h1>/g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
-
-		#TODO: Make this sed work on either (make a character set?)
-		# Replace all left-side quotation marks (“) with vertical quotes.
-		sed -i 's/“/"/g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
-		# Replace all right-side quotation marks (”) with vertical quotes.
-		sed -i 's/”/"/g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
-
-		# Replaces all left-side single-quote marks (‘) with a vertical single-quote.
-		sed -i 's/‘/'"'"'/g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
-		# Replaces all right-side single-quote marks (’) with a vertical single-quote.
-		sed -i 's/’/'"'"'/g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
-
-		# Replaces all elipse marks (…) with three period marks.
-		sed -i 's/…/.../g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
+		replace_invalid_chars "${currentOutputFileName}"
 
 		#Convert the previous html file to a pdf.
-		echo "Creating pdf from volume #"$volumeNumber
+		echo "Creating pdf from volume #${volumeNumber}"
 		# TODO: Make this a relative path, an actual command, or just a parameter...
 		# TODO: Make this an optional step, controlled by a user-parameter
-		/c/Program\ Files/wkhtmltopdf/bin/wkhtmltopdf.exe "${outputDir}/${storyName}volume_${volumeNumber}.html" ${storyName}volume_$volumeNumber.pdf
+		/c/Program\ Files/wkhtmltopdf/bin/wkhtmltopdf.exe "${currentOutputFileName}" ${storyName}volume_$volumeNumber.pdf
 
 		volumeNumber=$((volumeNumber+1));
-		# FIXME: Make counter start at 1, make this loop run while counter <= chaptersPerFile and remove the places where I'm logging counter + 1
 		counter=1;
 
 		#Appends the opening HTML tags to the new volume file.
 		echo $HTML_OPENING_TAGS $HTML_STYLE_TAG > "${outputDir}/${storyName}volume_${volumeNumber}.html"
 
-		echo "Resetting counter to ${counter} and beginning volume number ${volumeNumber}"
+		echo "Resetting internal counter to ${counter} and beginning volume number ${volumeNumber}"
 	else 
-		echo "parsing content from chapter ${counter} out of ${chaptersPerFile} for volume number ${volumeNumber}"
+		echo "Parsing content from chapter ${counter} out of ${chaptersPerFile} for volume number ${volumeNumber}"
 	fi
+
+	currentOutputFileName="${outputDir}/${storyName}volume_${volumeNumber}.html"
+	echo "Parsing ${file} and piping it into ${currentOutputFileName}"
+
+	# TODO: Determine if we have a full volume here. If not, don't show the current chapter as ${counter}/${chaptersPerFile}, but instead show it as ${counter}/<chapters in the current volume>
+	# Given: we know $currentChapter, $chapterCount, $volumeNumber, and ${chaptersPerFile}
+
+	echo "${HTML_CHAPTER_TITLE_OPENING_TAG}Chapter ${counter}/${chaptersPerFile} ${HTML_CHAPTER_TITLE_CLOSING_TAG}" >> "${currentOutputFileName}"
 	
-	echo "Parsing $file and piping it into "${outputDir}/${storyName}volume_${volumeNumber}.html""
-	
-	echo "${HTML_CHAPTER_TITLE_OPENING_TAG}Chapter ${counter}/${chaptersPerFile} ${HTML_CHAPTER_TITLE_CLOSING_TAG}" >> "${outputDir}/${storyName}volume_${volumeNumber}.html"
-	
-	grep "<title>Chapter [0-9]" $file >> "${outputDir}/${storyName}volume_${volumeNumber}.html"
+	grep "<title>Chapter [0-9]" $file >> "${currentOutputFileName}"
 
 	# line1 is where the chapter's content starts.
 	line1=$(grep -n "$chapterStartText" $file | head -n 1 | cut -f1 -d:)
@@ -419,42 +431,27 @@ do
 	# Notice: this is a non-inclusive match (at least as far as line2 goes). This means we're successfully snipping out the advertisements element on line2!
 	# We are appending the found text to the current volume file
 	if [ -z $line1 ] || [ -z $line2 ]; then 
-		echo "failed to parse content of chapter number $counter."  >> "${outputDir}/${storyName}volume_${volumeNumber}.html"
+		echo "failed to parse content of chapter number $counter."  >> "${currentOutputFileName}"
 	else
-		cat $file | tail -n +$line1 | head -n $((line2-line1)) >> "${outputDir}/${storyName}volume_${volumeNumber}.html"
+		cat $file | tail -n +$line1 | head -n $((line2-line1)) >> "${currentOutputFileName}"
 	fi
 
 	# Appending a horizontal rule after the end of the current volume.
-	echo "<hr>"  >> "${outputDir}/${storyName}volume_${volumeNumber}.html"
+	echo "<hr>"  >> "${currentOutputFileName}"
 	counter=$((counter+1));
 done
 
-# Appends the ending HTML tags to the last volume file.
-echo $HTML_CLOSING_TAGS >> "${outputDir}/${storyName}volume_${volumeNumber}.html"
+# TODO: This one shouldn't be necessary. Confirm it isn't and then remove it.
+#currentOutputFileName="${outputDir}/${storyName}volume_${volumeNumber}.html"
+
 #Appends the ending HTML tags to the previous volume file.
+echo $HTML_CLOSING_TAGS >> "${currentOutputFileName}"
 
-# Replace the the text "title>" with "h1>" in the previous volume
-sed -i 's/title>/h1>/g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
-
-#TODO: Make this sed work on either (make a character set?)
-# Replace all left-side quotation marks (“) with vertical quotes.
-sed -i 's/“/"/g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
-# Replace all right-side quotation marks (”) with vertical quotes.
-sed -i 's/”/"/g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
-
-# Replaces all left-side single-quote marks (‘) with a vertical single-quote.
-sed -i 's/‘/'"'"'/g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
-# Replaces all right-side single-quote marks (’) with a vertical single-quote.
-sed -i 's/’/'"'"'/g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
-
-# Replaces all elipse marks (…) with three period marks.
-sed -i 's/…/.../g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
-
-# Replace the the text "title>" with "h1>" in the last volume
-sed -i 's/title>/h1>/g' "${outputDir}/${storyName}volume_${volumeNumber}.html"
+replace_invalid_chars "${currentOutputFileName}"
 
 # Convert the last html file to a pdf.
-echo "Creating pdf from volume #"$volumeNumber
+echo "Creating pdf from volume #${volumeNumber}"
+
 # TODO: Make this a relative path, an actual command, or just a parameter...
 # TODO: Make this an optional step, controlled by a user-parameter
-/c/Program\ Files/wkhtmltopdf/bin/wkhtmltopdf.exe "${outputDir}/${storyName}volume_${volumeNumber}.html" "${storyName}volume_${volumeNumber}.pdf"
+/c/Program\ Files/wkhtmltopdf/bin/wkhtmltopdf.exe "${currentOutputFileName}" "${storyName}volume_${volumeNumber}.pdf"
