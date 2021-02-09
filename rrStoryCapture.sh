@@ -118,6 +118,10 @@ let storyName
 for arg in "$@"
 do
 	case $arg in
+		-h|--help)
+		echo "Sorry, I haven't written the help message yet."
+		exit 0;
+		;;
 		-l=*|--link-root=*)
 		toc_LinkRoot="${arg#*=}"
 		shift
@@ -233,9 +237,20 @@ if [[ $skipToc = "false" ]]; then
 
 	mkdir toc_working
 	#TODO: remove this directory when we are done...
+	
+	# TODO: rm toc_working/tocInProgress
 
 	echo "curling $toc_URL to access table of contents for story."
 	curl $toc_URL > toc_working/tocInProgress
+
+	curlStatusCode=$?
+
+	# Is the second condition here even worth it? I can't get curl to fail for the absolute life of me.
+	if [[ ! -f toc_working/tocInProgress ]] || [[ $curlStatusCode -ne 0 ]]; then
+		# toc_working/tocInProgress doesn't exist or the curl for the table of contents returned unsuccessfully.
+		# TODO: exit 1;
+		echo ""
+	fi
 
 	grep $toc_Id toc_working/tocInProgress > toc_working/toBeTrimmed
 
@@ -421,7 +436,7 @@ do
 
 	# line1 is where the chapter's content starts.
 	line1=$(grep -n "$chapterStartText" $file | head -n 1 | cut -f1 -d:)
-	echo "Chapter ${counter} begins at line: [$line1]"
+	#echo "Chapter ${counter} begins at line: [$line1]"
 
 	line1=$(($line1 - $firstLineOffset))
 
@@ -430,12 +445,12 @@ do
 		# line2 is where the chapter's content ends.
 		line2=$(grep -n "$chapterEndText" $file | head -n 1 | cut -f1 -d:)
 		line2=$(($line2 - $lastLineOffset))
-		echo "Chapter ${counter} ends at line: [$line2]"
+		#echo "Chapter ${counter} ends at line: [$line2]"
 	else
 		# If chapterEndText does not exist within the file, use backupEndText instead of chapterEndText to determine where the chapter text ends.
 		line2=$(grep -n "$backupEndText" $file | head -n 1 | cut -f1 -d:)
 		line2=$(($line2 - $backupEndLineOffset))
-		echo "Chapter ${counter} ends at line: [$line2]"
+		#echo "Chapter ${counter} ends at line: [$line2]"
 	fi
 
 	#line2=$(($line2 - $lastLineOffset))
