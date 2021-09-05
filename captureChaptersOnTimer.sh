@@ -23,8 +23,6 @@ exitMethod() {
 	exit $1
 }
 
-storyCaptureScript="${originalDirectory}/rrStoryCapture.sh"
-
 exitCodes="0: A successful result\
 1: General errors\
 2: Failure to connect to the provided URL\
@@ -32,6 +30,9 @@ exitCodes="0: A successful result\
 4: The status file was found and not enough time has passed since the last successful run.\
 5: Parameters were missing.\
 6: Story capture script was missing."
+
+# TODO: Make this less fragile
+homeDirectory='/c/Users/bcavanaugh/Documents/sharedGitRepo/storyCapture'
 
 defaultStatusFileName="status"
 
@@ -51,6 +52,10 @@ do
 		-h|--help)
 		echo "Sorry, I haven't written the help message yet."
 		exitMethod 0;
+		;;
+		-m=*|--home-directory=*)
+		homeDirectory="${arg#*=}"
+		shift
 		;;
 		-l=*|--link-root=*)
 		toc_LinkRoot="${arg#*=}"
@@ -80,6 +85,15 @@ do
 		;;
 	esac
 done
+
+if [[ ! -d $homeDirectory ]]; then
+	log "Home directory for the script did not exist at: [${homeDirectory}], meaning the story capture script cannot exist within it. Cannot continue. Exiting now."
+	exitMethod 6
+fi
+
+cd $homeDirectory
+
+storyCaptureScript="${homeDirectory}/rrStoryCapture.sh"
 
 if [[ ! -f $storyCaptureScript ]]; then
 	log "Failed to find the story capture script at: [${storyCaptureScript}]. Cannot continue. Exiting now."
