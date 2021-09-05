@@ -54,6 +54,7 @@ logTrace () {
 }
 
 # TODO: Expand on this to also list the names of the new chapters found! Also the pdfs?
+# FIXME: In the event that no new chapters are found, chaptersFound is a negative number. This doesn't seem to support that.
 outputResults () {
 	printf '%s\n' '{' "chaptersFound=$1" '}';
 }
@@ -95,6 +96,100 @@ replace_invalid_chars () {
 
 	# Replaces all elipse marks (…) with three period marks.
 	sed -i 's/…/.../g' "${fileName}"
+}
+
+capture_table_of_contents_royalroad () {
+	toc_URL=$1
+	#TODO: Check the first and last characters of toc_Id for a /. If they aren't there then add them.
+
+	mkdir toc_working
+	#TODO: remove this directory when we are done?
+	
+	# TODO: rm toc_working/tocInProgress
+
+	logInfo "curling $toc_URL to access table of contents for story."
+	httpStatusCode=$(curl $toc_URL -o toc_working/tocInProgress -w "%{http_code}")
+
+	if [[ ! -f toc_working/tocInProgress ]] || [[ ! "$httpStatusCode" =~ \s*^2[0-9][0-9]\s* ]]; then
+		# toc_working/tocInProgress doesn't exist or the curl for the table of contents returned a non-200 series status code.
+		logError "Failed to download table of contents page for the story: [${storyName}] from the url: [${toc_URL}]. Please check the URL and network connection and try again."
+		# In theory it could also be an issue with creating the table of contents files in that directory...
+		echo $TOC_DOWNLOAD_FAILURE_MESSAGE
+		exit 1;
+	fi
+	
+	## TODO: replace everything from this grep statement all the way down to that uniq statement with a call to extractMatchesByPattern(). TODO: automatically make a regex based on $toc_Id for this.
+	## Alternatively, ask the user for a regex?
+
+	grep $toc_Id toc_working/tocInProgress > toc_working/toBeTrimmed
+
+	logInfo "Stripping out illegal characters from ToC file."
+
+	# Strips out html tags from the document.
+	sed -i 's/<tr style="cursor: pointer" data-url="//g' toc_working/toBeTrimmed
+	sed -i 's/<a href="//g' toc_working/toBeTrimmed
+	sed -i 's/<a class="//g' toc_working/toBeTrimmed
+	sed -i 's/">//g' toc_working/toBeTrimmed
+
+	# Strips out all spaces.
+	sed -i 's/ //g' toc_working/toBeTrimmed
+
+	# Trims off the first 2 lines. These are usually present, always garbage when they show up, and the good links always come in sets of threes, so we're safe to trim of them.
+	sed -i 1,2d toc_working/toBeTrimmed
+
+	# Trims off the last line. This is the always-present "reviews" link. Also, usable links always show up in sets of threes, so we're safe to remove it.
+	sed -i '$ d' toc_working/toBeTrimmed
+
+	logInfo "De-duplicate filtering ToC"
+	uniq toc_working/toBeTrimmed > $tocFileName
+}
+
+capture_table_of_contents_wanderinginn () {
+	#toc_URL="https://wanderinginn.com/"
+	toc_URL=$1
+	listStartText="<aside id=\"text-7\""
+	#listStartText=$2
+	listEndText="</aside"
+	#listEndText=$3
+
+	# FIXME: Currently this is getting $2 and $3 in reverse order. I don't know why. Until that's been fixed we need to just hard-code these fields.
+
+
+	initialFileName="toc_working/toBeTrimmed"
+	wipFileName="toc_working/inProgress"
+	finalFileName=$tocFileName
+
+	curl $toc_URL > $initialFileName
+	logTrace "The full content from [${toc_URL}] was copied into a new file at [${initialFileName}]"
+
+	line1=$(grep -n "$listStartText" toc_working/toBeTrimmed | head -n 1 | cut -f1 -d:)
+	line1=$(($line1 + 1))
+	logTrace "The listStartText of: [${listStartText}] was found on line: [${line1}] of that file. Everything on and after that line will be copied into the new file: [${wipFileName}]"
+
+	cat toc_working/toBeTrimmed | tail -n +$line1 > $wipFileName
+
+	line2=$(grep -n "$listEndText" -m2 $wipFileName | tail -n1 | head -n 1 | cut -f1 -d:)
+	line2=$(($line2 - 1))
+	logTrace "The listEndText of: [${listEndText}] was found on line: [${line2}] of that file. Everything before that line will be copied into the new file: [${finalFileName}]"
+
+	cat $wipFileName | head -n $line2 | grep "<a href=" > $finalFileName
+
+	# Filter out every </a>
+	sed -i 's/<\/a>//g' $finalFileName
+
+	sed -i 's/<p><strong>Volume [0-9]\+//g' $finalFileName
+	sed -i 's/<\/strong><\/p>//g' $finalFileName
+
+	# Filter out every <br />
+	sed -i 's/<br\s*\/>//g' $finalFileName
+
+	sed -i 's/<p style="padding-left:30px;">//g' $finalFileName
+	sed -i 's/<a href=//g' $finalFileName
+	sed -i 's/<\/p>//g' $finalFileName
+
+	sed -i 's/>/ /g' $finalFileName
+	
+	logTrace "The final toc file: [${finalFileName}] has been stripped of its html tags and is ready for parsing."
 }
 
 # This is used to extract links from a page, either chapter links from a TOC or image links from a regular page.
@@ -148,6 +243,9 @@ redownloadChapters="false"
 
 firstLineInclusive="false"
 lastLineInclusive="false"
+
+#Controls whether or not to run in the mode dedicated to capturing chapters from www.wanderininn.com
+wanderinginnMode="false"
 
 # In RoyalRoad stories this text corresponds to the div that contains the chapter's content.
 chapterStartText="chapter-inner chapter-content"
@@ -282,6 +380,22 @@ do
 		quietMode="false"
 		shift
 		;;
+		-w|--wandering-inn)
+		# Adds more detail to log files where possible.
+		# Not compatible with --quiet.
+		wanderinginnMode="true"
+
+		## TODO: Set the chapterStartText and chapterEndText here!
+		## Remember, it needs to work on both the original wordpress pages and the new ones directly on www.wanderinginn.com
+		## It might work to use chapterStartText, chapterEndText, and backupEndText
+		chapterStartText="<div class=\"entry-content\">"
+		#chapterEndText="<p>(<span.*>)?<a href=.*>Previous Chapter"
+		chapterEndText="<a href=.*>Previous Chapter"
+		#backupEndText="<p>(<span.*>)?<a href=.*>Next Chapter"
+		backupEndText="<a href=.*>Next Chapter"
+		lastLineOffset=2;
+		shift
+		;;
 		*)
 		OTHER_ARGUMENTS+=("$1")
 		shift # Remove generic argument from processing
@@ -312,49 +426,22 @@ logFilePath="${storyName}log.txt"
 
 ############### Section for downloading TOC. 
 if [[ $skipToc = "false" ]]; then
-	toc_URL=${toc_LinkRoot}${toc_Id}
-	#TODO: Check the first and last characters of toc_Id for a /. If they aren't there then add them.
-
-	mkdir toc_working
-	#TODO: remove this directory when we are done?
-	
-	# TODO: rm toc_working/tocInProgress
-
-	logInfo "curling $toc_URL to access table of contents for story."
-	httpStatusCode=$(curl $toc_URL -o toc_working/tocInProgress -w "%{http_code}")
-
-	if [[ ! -f toc_working/tocInProgress ]] || [[ ! "$httpStatusCode" =~ \s*^2[0-9][0-9]\s* ]]; then
-		# toc_working/tocInProgress doesn't exist or the curl for the table of contents returned a non-200 series status code.
-		logError "Failed to download table of contents page for the story: [${storyName}] from the url: [${toc_URL}]. Please check the URL and network connection and try again."
-		# In theory it could also be an issue with creating the table of contents files in that directory...
-		echo $TOC_DOWNLOAD_FAILURE_MESSAGE
-		exit 1;
+	if [[ $wanderinginnMode = "false" ]]; then
+		# call the method for creating the standard toc here and put it into $tocFileName
+		toc_URL=${toc_LinkRoot}${toc_Id}
+		capture_table_of_contents_royalroad $toc_URL
+	else
+		# call the method for creating the wanderinginn.com-specific toc here and put it into $tocFileName
+		toc_LinkRoot=""
+		toc_URL=${toc_Id}
+		tocStartText="<aside id=\"text-7\""
+		tocEndText="</aside"
+		
+		logTrace "The tocStartText is: [${tocStartText}]"
+		logTrace "The tocEndText is: [${tocEndText}]"
+		
+		capture_table_of_contents_wanderinginn $toc_URL $tocStartText $tocEndText
 	fi
-	
-	## TODO: replace everything from this grep statement all the way down to that uniq statement with a call to extractMatchesByPattern(). TODO: automatically make a regex based on $toc_Id for this.
-	## Alternatively, ask the user for a regex?
-
-	grep $toc_Id toc_working/tocInProgress > toc_working/toBeTrimmed
-
-	logInfo "Stripping out illegal characters from ToC file."
-
-	# Strips out html tags from the document.
-	sed -i 's/<tr style="cursor: pointer" data-url="//g' toc_working/toBeTrimmed
-	sed -i 's/<a href="//g' toc_working/toBeTrimmed
-	sed -i 's/<a class="//g' toc_working/toBeTrimmed
-	sed -i 's/">//g' toc_working/toBeTrimmed
-
-	# Strips out all spaces.
-	sed -i 's/ //g' toc_working/toBeTrimmed
-
-	# Trims off the first 2 lines. These are usually present, always garbage when they show up, and the good links always come in sets of threes, so we're safe to trim of them.
-	sed -i 1,2d toc_working/toBeTrimmed
-
-	# Trims off the last line. This is the always-present "reviews" link. Also, usable links always show up in sets of threes, so we're safe to remove it.
-	sed -i '$ d' toc_working/toBeTrimmed
-
-	logInfo "De-duplicate filtering ToC"
-	uniq toc_working/toBeTrimmed > $tocFileName
 fi
 
 ################ Section for downloading chapter files:
@@ -369,8 +456,37 @@ else
 		mkdir "${storyName}chapters";
 	fi
 
+	unformattedURL=$line
+
 	while read line; do
-		nextChapterName="${storyName}chapters/chapter_${index}.html"
+		if [[ $wanderinginnMode = "true" ]]; then
+			# This Regular Expression pattern splits the line into two portions and use the second half for nextChapterName
+			newRegex="\"(.*)\" (.*)"
+			if [[ $line =~ $newRegex ]]; then
+				# Sets the chapter's url to the text between the quotation marks before the fist space and removes the text ".wordpress" from the url if it exists.
+				unformattedURL="${BASH_REMATCH[1]//.wordpress/}"
+
+				# Sets the chapter's fileName to the text after the first space outside a quote mark and replaces any spaces in it chapterTitle with underscores.
+				chapterTitle="${BASH_REMATCH[2]// /_}"
+				nextChapterName="${storyName}chapters/chapter_${index}_${chapterTitle}.html"
+			else
+				logInfo "The line [${line}] doesn't match the expected pattern for a url followed by a name. It will be skipped." >&2
+				# TODO: put a "continue" statement here...
+			fi
+		else
+			# The normal case of operations goes here.
+			nextChapterName="${storyName}chapters/chapter_${index}.html"
+		fi
+
+		# If the current url does not contain a period, ensure it ends in exactly one slash mark
+		#if [[ ! $unformattedURL =~ '/'$ ]] && [[ ! "$unformattedURL" == *"\."* ]]; then
+		if [[ "$(basename $unformattedURL)" == *"."* ]]; then
+			unformattedURL="${unformattedURL}/"
+		else
+			# Removes every slash mark from the end of the current url and then add one to the end.
+			unformattedURL="${unformattedURL%/?}/"
+		fi
+
 		# TODO: Add a check to see if the whole file is less than 50 characters?
 		# TODO: Try and extract the chapter name from the url?
 		# And do what with it?
@@ -386,7 +502,7 @@ else
 				# Ex: If only 24 chapters were originally produced and now 35 exist the default behavior would be to completely recreate volume_1, however this flag would change the behavior so that chapters 25-35 would instead go into a new volume named volume_1.2
 
 			# The url begins with the link root and ends with the first space in the current line. Anything after that is cut off.
-			url=${toc_LinkRoot}$(echo $line | cut -f1 -d' ')
+			url=${toc_LinkRoot}$(echo $unformattedURL | cut -f1 -d' ')
 
 			# Echoing a blank line for clarity when logging...
 			logInfo "Downloading chapter #${index} from the url: ${url} and saving it under the name ${nextChapterName}"
@@ -401,6 +517,7 @@ fi
 
 if [[ $skipVolumes = "true" ]]; then
 	echo "Skipping the volume generation step. Exiting now."
+	logInfo "Skipping the volume generation step. Exiting now."
 	exit 0;
 fi
 
@@ -485,7 +602,7 @@ do
 		chaptersInThisFile=$chapterCountOfIncompleteVolume
 	fi
 	
-	file="./${storyName}chapters/chapter_${currentChapter}.html"
+	file="./${storyName}chapters/chapter_${currentChapter}_*.html"
 	if (( $counter > $chaptersInThisVolume)); then
 		logInfo "While constructing volume number [${volumeNumber}], [${chaptersInThisVolume}] out of [${chaptersInThisVolume}] chapters were included. The volume will now be finalized and chapter number [${counter}] will be included in the next volume."
 
