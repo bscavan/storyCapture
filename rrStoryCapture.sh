@@ -5,22 +5,58 @@
 ## The script relies on the freely-distributed tool wkhtmltopdf for the final conversion from html to pdf. If that step is not necessary then the dependency is unnecessary and those failed lines will not stop the rest of the script from running.
 # @Author: bcavanaugh
 # @Created: 9/18/19
-# @LastModified: 10/12/20
+# @LastModified: 2/24/21
 
 
 ### Planned improvements:
 # Rename the "chapters" and "output" directories to be specific to the story's title, allowing multiple stories to be saved off in the same parent directory without overwriting.
 # -q and -v modes, controlling the amount of logging.
-# options for skipping the curling and controls for only curling new chapters (along with code to determine which volumes need to be recreated so the new chapters can be included).
+# At that point, I would probably just default to a logging-level system.
 # An option to skip the conversion to pdf.
 # Reduce the URL and Id to one value (have the code pull out everything after the website name and generate the id...)
 # Splitting the individual pieces into functions?
 # Make the path to wkhtmltopdf a parameter.
-# Params for overwriting the root url and search strings?
 # A param for changing the font-size style in the resulting HTML.
 
+# Control flag use to handle logging.
+quietMode="false"
+logFilePath=""
+
+# TODO: Convert the log method to append to a logging file instead!
+# TODO: Make the logging actually include useful details, like if new files were found or if the user specified all chapters should be re-downloaded.
 
 ##### Helper functions: #####
+
+# TODO: make different versions of logging? One for info, one for debug, one for trace, etc.?
+log () {
+	#if [[ $quietMode != "true" ]]; then
+	#	echo $1
+	#fi
+	echo $1 >> $logFilePath
+}
+
+logError () {
+	# TODO: Put this into std_err?
+	#echo $1
+	echo $1 >> $logFilePath
+}
+
+logInfo () {
+	if [[ $quietMode != "true" ]]; then
+		echo $1 >> $logFilePath
+	fi
+}
+
+logTrace () {
+	if [[ $verboseMode -eq "true" ]]; then
+		echo $1 >> $logFilePath
+	fi
+}
+
+# TODO: Expand on this to also list the names of the new chapters found! Also the pdfs?
+outputResults () {
+	printf '%s\n' '{' "chaptersFound=$1" '}';
+}
 
 # Returns the greater of two numbers provided.
 max () {
@@ -61,6 +97,27 @@ replace_invalid_chars () {
 	sed -i 's/…/.../g' "${fileName}"
 }
 
+# This is used to extract links from a page, either chapter links from a TOC or image links from a regular page.
+extractMatchesByPattern () {
+	linkPattern=$1
+	input=$2
+
+	for word in $(cat $input); do
+		# Check to see if the current word matches the linkPattern.
+		[[ $word =~ $linkPattern ]]
+
+		# If a match to the linkPattern has been found...
+		if [[ ${BASH_REMATCH[0]} ]]; then
+			# Echo the text of the match to std_out.
+			echo ${BASH_REMATCH[0]}
+		fi
+	done
+}
+
+# List return values and error messages here.
+
+TOC_DOWNLOAD_FAILURE_MESSAGE="Failed to downlaod toc"
+
 ##### Parameters #####
 
 # This normally starts at zero.
@@ -84,6 +141,7 @@ toc_LinkRoot="https://www.royalroad.com"
 
 skipToc="false"
 skipChapters="false"
+skipVolumes="false"
 
 recreateVolumes="false"
 redownloadChapters="false"
@@ -120,6 +178,7 @@ do
 	case $arg in
 		-h|--help)
 		echo "Sorry, I haven't written the help message yet."
+		outputResults 0
 		exit 0;
 		;;
 		-l=*|--link-root=*)
@@ -156,6 +215,11 @@ do
 		# skip the toc-download and chapter-download steps. This uses an existing chapters directory for generating volumes.
 		skipToc="true"
 		skipChapters="true"
+		shift
+		;;
+		-o|--only-chapters)
+		# run the toc-download and chapter-download steps but not the volume step.
+		skipVolumes="true"
 		shift
 		;;
 		-f|--font-size=*)
@@ -204,6 +268,20 @@ do
 		backupEndText="${arg#*=}"
 		shift
 		;;
+		-q|--quiet)
+		# Suppresses some of the logging to limit what appears in log files.
+		# Not compatible with --verbose.
+		quietMode="true"
+		verboseMode="false"
+		shift
+		;;
+		-v|--verbose)
+		# Adds more detail to log files where possible.
+		# Not compatible with --quiet.
+		verboseMode="true"
+		quietMode="false"
+		shift
+		;;
 		*)
 		OTHER_ARGUMENTS+=("$1")
 		shift # Remove generic argument from processing
@@ -215,7 +293,7 @@ done
 if [[ $firstLineOffset -eq 0 && $firstLineInclusive = "true" ]]; then
 	# If the pattern for the "start text" is actually the first line and not the line one before the first, we want to decrease $line1 by 1 so the last line will be kept.
 	firstLineOffset=-1
-	echo "firstLineInclusive was true. New value for the starting line of the chapter is: [$line2]"
+	logInfo "firstLineInclusive was true. New value for the starting line of the chapter is: [$line2]"
 fi
 
 # Commented-out while trying to work-in handling for backupEndText... (It needs a different offset)
@@ -223,12 +301,14 @@ fi
 if [[ $lastLineOffset -eq 0 && $lastLineInclusive = "true" ]]; then
 	# If the pattern for the "end text" is actually the last line and not the line one after the end, we want to increase $line2 by 1 so the last line will be kept.
 	lastLineOffset=1
-	echo "lastLineInclusive was true. New value for the ending line of the chapter is: [$line2]"
+	logInfo "lastLineInclusive was true. New value for the ending line of the chapter is: [$line2]"
 fi
 
 ##### Main: ####
 
 outputDir="./${storyName}output"
+logFilePath="${storyName}log.txt"
+# TODO: add a means of rotating logs?
 
 ############### Section for downloading TOC. 
 if [[ $skipToc = "false" ]]; then
@@ -236,25 +316,27 @@ if [[ $skipToc = "false" ]]; then
 	#TODO: Check the first and last characters of toc_Id for a /. If they aren't there then add them.
 
 	mkdir toc_working
-	#TODO: remove this directory when we are done...
+	#TODO: remove this directory when we are done?
 	
 	# TODO: rm toc_working/tocInProgress
 
-	echo "curling $toc_URL to access table of contents for story."
-	curl $toc_URL > toc_working/tocInProgress
+	logInfo "curling $toc_URL to access table of contents for story."
+	httpStatusCode=$(curl $toc_URL -o toc_working/tocInProgress -w "%{http_code}")
 
-	curlStatusCode=$?
-
-	# Is the second condition here even worth it? I can't get curl to fail for the absolute life of me.
-	if [[ ! -f toc_working/tocInProgress ]] || [[ $curlStatusCode -ne 0 ]]; then
-		# toc_working/tocInProgress doesn't exist or the curl for the table of contents returned unsuccessfully.
-		# TODO: exit 1;
-		echo ""
+	if [[ ! -f toc_working/tocInProgress ]] || [[ ! "$httpStatusCode" =~ \s*^2[0-9][0-9]\s* ]]; then
+		# toc_working/tocInProgress doesn't exist or the curl for the table of contents returned a non-200 series status code.
+		logError "Failed to download table of contents page for the story: [${storyName}] from the url: [${toc_URL}]. Please check the URL and network connection and try again."
+		# In theory it could also be an issue with creating the table of contents files in that directory...
+		echo $TOC_DOWNLOAD_FAILURE_MESSAGE
+		exit 1;
 	fi
+	
+	## TODO: replace everything from this grep statement all the way down to that uniq statement with a call to extractMatchesByPattern(). TODO: automatically make a regex based on $toc_Id for this.
+	## Alternatively, ask the user for a regex?
 
 	grep $toc_Id toc_working/tocInProgress > toc_working/toBeTrimmed
 
-	echo "Stripping out illegal characters from ToC file."
+	logInfo "Stripping out illegal characters from ToC file."
 
 	# Strips out html tags from the document.
 	sed -i 's/<tr style="cursor: pointer" data-url="//g' toc_working/toBeTrimmed
@@ -271,7 +353,7 @@ if [[ $skipToc = "false" ]]; then
 	# Trims off the last line. This is the always-present "reviews" link. Also, usable links always show up in sets of threes, so we're safe to remove it.
 	sed -i '$ d' toc_working/toBeTrimmed
 
-	echo "De-duplicate filtering ToC"
+	logInfo "De-duplicate filtering ToC"
 	uniq toc_working/toBeTrimmed > $tocFileName
 fi
 
@@ -282,7 +364,7 @@ if [[ $skipChapters = "true" ]]; then
 else
 	#TODO: Preface the chapters, toc_working, and output directories with a title param passed in by the user-parameter
 	# to identifiy the story.
-	echo "Copying chapters from site to local directory: [${storyName}chapters]."
+	logInfo "Copying chapters from site to local directory: [${storyName}chapters]."
 	if [ ! -d "${storyName}chapters" ]; then
 		mkdir "${storyName}chapters";
 	fi
@@ -294,11 +376,10 @@ else
 		# And do what with it?
 		if [[ $redownloadChapters = "false" ]] && [ -f $nextChapterName ]; then
 			# Echoing a blank line for clarity when logging...
-			echo "\n"
-			echo "Chapter number ${index} already exists and is saved under the file name ${nextChapterName}. It will not be re-downloaded."
+			logInfo "Chapter number ${index} already exists and is saved under the file name ${nextChapterName}. It will not be re-downloaded."
 		else
 			if [ $firstNewChapter -lt 0 ]; then
-				#echo "The first new chapter found was: $firstNewChapter, and it is now being set to $index"
+				logInfo "The first new chapter found was: $firstNewChapter, and it is now being set to $index"
 				firstNewChapter=$index
 			fi
 			# TODO: Make a command-line flag that controls whether the latest volume is completely recreated with the new chapters added or if a new volume is produced instead.
@@ -308,8 +389,7 @@ else
 			url=${toc_LinkRoot}$(echo $line | cut -f1 -d' ')
 
 			# Echoing a blank line for clarity when logging...
-			echo "\n"
-			echo "Downloading chapter #${index} from the url: ${url} and saving it under the name ${nextChapterName}"
+			logInfo "Downloading chapter #${index} from the url: ${url} and saving it under the name ${nextChapterName}"
 
 			curl $url > $nextChapterName
 		fi
@@ -319,23 +399,29 @@ else
 	done < $tocFileName
 fi
 
+if [[ $skipVolumes = "true" ]]; then
+	echo "Skipping the volume generation step. Exiting now."
+	exit 0;
+fi
+
 # TODO: Make this a value users can overwrite
 # WARNING: When using --update mode take care to always use the same value for chaptersPerFile. If an update is being made this tool assumes existing volumes already have the specified number of files. If, for example, 800 chapters were saved with each volume holding 50 chapters, and update is run with a new setting for 60 chapters per file, the tool will believe chapter 801 should go into volume 13, not 17. As a result every volume from 1 to 12 will have 50 sequential chapters, for with volume 12 ending at chapter 600. Then volume 13 will skip ahead to chapter 780. Also, depending on the number of new chapters, later volumes may or may not be overwritten at all. Such as if only chapters 801 to 810 were newly available. In that instance volume 13 would contain chapters 780 to 810, and then volumes 14 to 16 would still contain chapters 651 to 800.
 	# Note to self "--update mode" is a planned feature, one that will preserve existing volumes when new chapters are found and only update the ones missing them/generate new volumes as needed.
 		# Alternatively, whenever we allow users to specify a new volume size, force it to recreate the volumes.
 let chaptersPerFile=50;
 
-echo "/n"
+logInfo "/n"
 
 if [[ $recreateVolumes = "true" ]]; then
 	firstNewChapter=1
 fi
 
-echo "The first new chapter found was $firstNewChapter"
+logInfo "The first new chapter found was $firstNewChapter"
 
 # If the variable firstNewChapter has not been set then no new chapters were found.
 if [ $firstNewChapter -lt 0 ]; then
-	echo "No new chapters were found. Therefore, no volumes need to be created."
+	log "No new chapters were found. Therefore, no volumes need to be created."
+	outputResults 0
 	exit 0;
 else
 	# FIXME: This section isn't working...
@@ -352,12 +438,12 @@ else
 
 		# Ensure that value is at least 1.
 		startVolumeNumber=$(max $startVolumeNumber 1)
-		echo "The first volume that contains new chapters will be $startVolumeNumber"
+		logInfo "The first volume that contains new chapters will be $startVolumeNumber"
 	fi
 
 	((startChapter = (startVolumeNumber - 1) * 50 + 1))
 	#startChapter=$(max $startChapter 1)
-	echo "The first chapter to include in that volume is $startChapter"
+	logInfo "The first chapter to include in that volume is $startChapter"
 fi
 
 let volumeNumber=$startVolumeNumber;
@@ -373,7 +459,7 @@ HTML_CHAPTER_TITLE_OPENING_TAG="<h1>"
 HTML_CHAPTER_TITLE_CLOSING_TAG="</h1>"
 HTML_CLOSING_TAGS="</body></html>"
 
-echo "Combining chapter contents into logical html volumes and then converting them to pdf files."
+logInfo "Combining chapter contents into logical html volumes and then converting them to pdf files."
 
 echo $HTML_OPENING_TAGS $HTML_STYLE_TAG > "${outputDir}/${storyName}volume_${volumeNumber}.html"
 
@@ -390,7 +476,7 @@ lastChapterInACompleteVolume=$(($lastCompleteVolume * $chaptersPerFile))
 # Note, mathematically speaking, $lastChapterInACompleteVolume cannot be greater than $chapterCount. It can only be fewer or equal. If it is fewer then $chapterCountOfIncompleteVolume will be used for the length of the last chapter. If it is equal then $chaptersPerFile will be used instead.
 chapterCountOfIncompleteVolume=$(($chapterCount - $lastChapterInACompleteVolume))
 
-echo "About to loop over all of the files in ./${storyName}chapters/, from chapter_ ${startChapter}.html to ${chapterCount}.html"
+logInfo "About to loop over all of the files in ./${storyName}chapters/, from chapter_ ${startChapter}.html to ${chapterCount}.html"
 for (( currentChapter=$startChapter; currentChapter<=$chapterCount; currentChapter++ ))
 do
 	let chaptersInThisVolume=$chaptersPerFile
@@ -401,7 +487,7 @@ do
 	
 	file="./${storyName}chapters/chapter_${currentChapter}.html"
 	if (( $counter > $chaptersInThisVolume)); then
-		echo "While constructing volume number [${volumeNumber}], [${chaptersInThisVolume}] out of [${chaptersInThisVolume}] chapters were included. The volume will now be finalized and chapter number [${counter}] will be included in the next volume."
+		logInfo "While constructing volume number [${volumeNumber}], [${chaptersInThisVolume}] out of [${chaptersInThisVolume}] chapters were included. The volume will now be finalized and chapter number [${counter}] will be included in the next volume."
 
 		currentOutputFileName="${outputDir}/${storyName}volume_${volumeNumber}.html"
 
@@ -411,7 +497,7 @@ do
 		replace_invalid_chars "${currentOutputFileName}"
 
 		#Convert the previous html file to a pdf.
-		echo "Creating pdf from volume #${volumeNumber}"
+		logInfo "Creating pdf from volume #${volumeNumber}"
 		# TODO: Make this a relative path, an actual command, or just a parameter...
 		# TODO: Make this an optional step, controlled by a user-parameter
 		/c/Program\ Files/wkhtmltopdf/bin/wkhtmltopdf.exe "${currentOutputFileName}" ${storyName}volume_$volumeNumber.pdf
@@ -422,21 +508,26 @@ do
 		#Appends the opening HTML tags to the new volume file.
 		echo $HTML_OPENING_TAGS $HTML_STYLE_TAG > "${outputDir}/${storyName}volume_${volumeNumber}.html"
 
-		echo "Resetting internal counter to ${counter} and beginning volume number ${volumeNumber}"
+		logInfo "Resetting internal counter to ${counter} and beginning volume number ${volumeNumber}"
 	else 
-		echo "Parsing content from chapter ${counter} out of ${chaptersInThisVolume} for volume number ${volumeNumber}"
+		logInfo "Parsing content from chapter ${counter} out of ${chaptersInThisVolume} for volume number ${volumeNumber}"
 	fi
 
 	currentOutputFileName="${outputDir}/${storyName}volume_${volumeNumber}.html"
-	echo "Parsing ${file} and piping it into ${currentOutputFileName}"
+	logInfo "Parsing ${file} and piping it into ${currentOutputFileName}"
 
-	echo "${HTML_CHAPTER_TITLE_OPENING_TAG}Chapter ${counter}/${chaptersInThisVolume} ${HTML_CHAPTER_TITLE_CLOSING_TAG}" >> "${currentOutputFileName}"
+	currentChapterHeading="${HTML_CHAPTER_TITLE_OPENING_TAG}Chapter ${counter}/${chaptersInThisVolume} ${HTML_CHAPTER_TITLE_CLOSING_TAG}"
+	logInfo "Current chapter heading: [${currentChapterHeading}]"
+	echo $currentChapterHeading >> "${currentOutputFileName}"
 
+	# If there is a title element in this file, append that whole line to the volume document.
 	grep "<title>Chapter [0-9]" $file >> "${currentOutputFileName}"
+	
+	## FIXME: Replace the above grep with a better one that only puts in the title element, and nothing besides that.
 
 	# line1 is where the chapter's content starts.
 	line1=$(grep -n "$chapterStartText" $file | head -n 1 | cut -f1 -d:)
-	#echo "Chapter ${counter} begins at line: [$line1]"
+	logTrace "Chapter ${counter} begins at line: [$line1]"
 
 	line1=$(($line1 - $firstLineOffset))
 
@@ -445,12 +536,12 @@ do
 		# line2 is where the chapter's content ends.
 		line2=$(grep -n "$chapterEndText" $file | head -n 1 | cut -f1 -d:)
 		line2=$(($line2 - $lastLineOffset))
-		#echo "Chapter ${counter} ends at line: [$line2]"
+		logTrace "Chapter ${counter} ends at line: [$line2]"
 	else
 		# If chapterEndText does not exist within the file, use backupEndText instead of chapterEndText to determine where the chapter text ends.
 		line2=$(grep -n "$backupEndText" $file | head -n 1 | cut -f1 -d:)
 		line2=$(($line2 - $backupEndLineOffset))
-		#echo "Chapter ${counter} ends at line: [$line2]"
+		logTrace "Chapter ${counter} ends at line: [$line2]"
 	fi
 
 	#line2=$(($line2 - $lastLineOffset))
@@ -458,10 +549,16 @@ do
 	# Notice: this is a non-inclusive match (at least as far as line2 goes). This means we're successfully snipping out the advertisements element on line2!
 	# We are appending the found text to the current volume file
 	if [ -z $line1 ] || [ -z $line2 ]; then 
-		echo "failed to parse content of chapter number $counter."  >> "${currentOutputFileName}"
+		echo "failed to parse content of chapter number $counter." >> "${currentOutputFileName}"
+		logError "failed to parse content of chapter number $counter."
 	else
 		cat $file | tail -n +$line1 | head -n $((line2-line1)) >> "${currentOutputFileName}"
 	fi
+	
+	# tr -s '\n' ' ' < chapter_1.html | tr -s '\r\n' ' ' > altered.html
+	# grep -oP "$shortPattern" ./altered.html
+	
+	# tr -s '\n' ' ' < chapter_1.html | tr -s '\r\n' ' ' | grep -oP "$pattern" >>  "${currentOutputFileName}"
 
 	# Appending a horizontal rule after the end of the current volume.
 	echo "<hr>"  >> "${currentOutputFileName}"
@@ -477,7 +574,7 @@ echo $HTML_CLOSING_TAGS >> "${currentOutputFileName}"
 replace_invalid_chars "${currentOutputFileName}"
 
 # Convert the last html file to a pdf.
-echo "Creating pdf from volume #${volumeNumber}"
+logInfo "Creating pdf from volume #${volumeNumber}"
 
 # TODO: Make this a relative path, an actual command, or just a parameter...
 # TODO: Make this an optional step, controlled by a user-parameter

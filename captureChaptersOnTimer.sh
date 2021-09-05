@@ -7,6 +7,14 @@ quietMode="false"
 # Set originalDirectory before changing directories into the directory for the current story.
 originalDirectory=$(pwd)
 
+# TODO: Write up some documentation stating this environmental variable needs to be manually set...
+homeDirectory="${STORY_CAPTURE_HOME_DIR}"
+# This is where the new chapters found by rrStoryCapture.sh are recorded. It is assumed to exist within homeDirectory unless the user overwrites it with an absolute path.
+# TODO: Determine how this can be handled. Present this information to the user somehow and let them view it at their leisure. When they "dismiss" the information, the results file should be cleared out.
+# TODO: Also timestamp the update messages to let the user know when we found each new group of chapters.
+resultsFile="results.txt"
+
+# TODO: Rewrite these to record their logs in files
 log () {
 	if [[ $quietMode != "true" ]]; then
 		echo $1
@@ -16,6 +24,10 @@ log () {
 logError () {
 	# TODO: Put this into std_err?
 	echo $1
+}
+
+recordResults () {
+	echo $1 >> $resultsFile
 }
 
 exitMethod() {
@@ -31,9 +43,6 @@ exitCodes="0: A successful result\
 5: Parameters were missing.\
 6: Story capture script was missing."
 
-# TODO: Make this less fragile
-homeDirectory='/c/Users/bcavanaugh/Documents/sharedGitRepo/storyCapture'
-
 defaultStatusFileName="status"
 
 # Measured in seconds
@@ -45,6 +54,8 @@ toc_LinkRoot="www.royalroad.com"
 toc_Id=""
 storyName=""
 
+# TODO: Eventually bundle these scripts together with the executables for bash.exe from git-bash and the scripts for wkhtmltopdf
+
 # Loop through arguments and process them
 for arg in "$@"
 do
@@ -55,6 +66,10 @@ do
 		;;
 		-m=*|--home-directory=*)
 		homeDirectory="${arg#*=}"
+		shift
+		;;
+		-r=*|--results-file=*)
+		resultsFile="${arg#*=}"
 		shift
 		;;
 		-l=*|--link-root=*)
@@ -90,6 +105,8 @@ if [[ ! -d $homeDirectory ]]; then
 	log "Home directory for the script did not exist at: [${homeDirectory}], meaning the story capture script cannot exist within it. Cannot continue. Exiting now."
 	exitMethod 6
 fi
+
+resultsFile="${homeDirectory}/${resultsFile}"
 
 cd $homeDirectory
 
@@ -171,39 +188,31 @@ if [[ $shouldRun != "true" ]]; then
 	exitMethod 4;
 fi
 
-#ping -n 1 $targetURL 2>&1 >/dev/null
+# Run the storyCapture.sh script here.
+storyCaptureOutput=$($storyCaptureScript --toc_LinkRoot=$toc_LinkRoot --name=$storyName --id=$toc_Id)
 
-#pingSuccessCode=$?
-pingSuccessCode=0
-# Artificially setting pingSuccessCode to 0 here because RoyalRoad blocks pings.
-# TODO: Determine if I can just replace ping with curl here...
+# Get the successCode of the script just ran.
+storyCaptureSuccessCode=$?
 
-#log "Success code of pinging [${targetURL}] was [${pingSuccessCode}]"
+# TODO: Adjust this script so it can report that info back to the user.
+if [[ $storyCaptureSuccessCode -eq 0 ]]; then
+	chaptersFound=$(echo "$storyCaptureOutput" | grep "chaptersFound" | cut -d '=' -f2)
+	log "Successfully storyCapture script on [${targetURL}]. It downloaded: [${chaptersFound}] chapters."
 
-if [[ $pingSuccessCode -ne 0 ]]; then
-	log "Failed to connect to the URL [${targetURL}]; Cannot proceed.";
-	exitMethod 2;
-else
-	# Run the storyCapture.sh script here.
-	$storyCaptureScript --toc_LinkRoot=$toc_LinkRoot --name=$storyName --id=$toc_Id
-
-	# Get the successCode of the script just ran.
-	storyCaptureSuccessCode=$?
-
-	# TODO: change the storyCapture.sh script so it reports whether new chapters were found.
-	# Adjust this script so it can report that info back to the user.
-
-	if [[ $pingSuccessCode -eq 0 ]]; then
-		log "Successfully captured chapters from [${targetURL}]. Exiting now."
-
-		# Update the status document with the last successful ping time?
-		printf '%s\n' '{' "timeStamp=$(date +%s)" '}' > $statusFileName
-		exitMethod 0;
-	else
-		log "Failed to capture chapters from [${targetURL}]. Exiting now."
-		exitMethod 1;
+	## TODO: Check $storyCaptureOutput here to determine if chapters were actually retrieved.
+	if [[ $chaptersFound -gt -0 ]]; then
+		## Add a statement about how many files were found to the log file!
+		recordResults "$(date +"%m-%d-%y %T"): story: [${storyName}], captured [${chaptersFound}] new chapters."
 	fi
+
+	# Update the status document with the last successful capture time
+	printf '%s\n' '{' "timeStamp=$(date +%s)" '}' > $statusFileName
+	exitMethod 0;
+else
+	log "Failed to capture chapters from [${targetURL}]. Exiting now."
+	exitMethod 1;
 fi
 
+# This secton should be unreachable.
 # Return to the original directory before terminating.
 exitMethod 0;
