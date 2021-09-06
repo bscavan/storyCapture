@@ -48,6 +48,9 @@ defaultStatusFileName="status"
 # Measured in seconds
 defaultWaitTimeBetweenRuns="3600"
 
+runWithoutId="false"
+wanderinginnModeFlag=""
+
 # TODO: Convert these into line-options.
 #toc_LinkRoot="https://www.royalroad.com"
 toc_LinkRoot="www.royalroad.com"
@@ -93,6 +96,11 @@ do
 		waitTimeBetweenRuns="${arg#*=}"
 		shift
 		;;
+		--wandering-inn)
+		wanderinginnModeFlag=' --wandering-inn'
+		runWithoutId="true"
+		shift
+		;;
 		*)
 		OTHER_ARGUMENTS+=("$1")
 		## TODO: Put $OTHER_ARGUMENTS into the call to ./rrStoryCapture.sh?
@@ -117,8 +125,8 @@ if [[ ! -f $storyCaptureScript ]]; then
 	exitMethod 6
 fi
 
-if [[ ! "$toc_Id" ]]; then
-	logError "An Id for the desired was not provided. Cannot continue."
+if [[ ! "$toc_Id" ]] && [[ ! $runWithoutId = "true"  ]]; then
+	logError "An Id for the desired story is required and one was not provided. Cannot continue."
 	exitMethod 5;
 fi
 
@@ -189,7 +197,7 @@ if [[ $shouldRun != "true" ]]; then
 fi
 
 # Run the storyCapture.sh script here.
-storyCaptureOutput=$($storyCaptureScript --toc_LinkRoot=$toc_LinkRoot --name=$storyName --id=$toc_Id)
+storyCaptureOutput=$($storyCaptureScript --toc_LinkRoot=$toc_LinkRoot --name=$storyName --id=$toc_Id ${wanderinginnModeFlag})
 
 # Get the successCode of the script just ran.
 storyCaptureSuccessCode=$?
