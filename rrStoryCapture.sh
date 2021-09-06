@@ -5,7 +5,7 @@
 ## The script relies on the freely-distributed tool wkhtmltopdf for the final conversion from html to pdf. If that step is not necessary then the dependency is unnecessary and those failed lines will not stop the rest of the script from running.
 # @Author: bcavanaugh
 # @Created: 9/18/19
-# @LastModified: 2/24/21
+# @LastModified: 9/5/21
 
 
 ### Planned improvements:
@@ -384,6 +384,7 @@ do
 		# Adds more detail to log files where possible.
 		# Not compatible with --quiet.
 		wanderinginnMode="true"
+		toc_Id="https://wanderinginn.com/"
 
 		## TODO: Set the chapterStartText and chapterEndText here!
 		## Remember, it needs to work on both the original wordpress pages and the new ones directly on www.wanderinginn.com
@@ -481,10 +482,14 @@ else
 		# If the current url does not contain a period, ensure it ends in exactly one slash mark
 		#if [[ ! $unformattedURL =~ '/'$ ]] && [[ ! "$unformattedURL" == *"\."* ]]; then
 		if [[ "$(basename $unformattedURL)" == *"."* ]]; then
+			logTrace "Chapter URL contained a period. An additional slash mark will be added to the end."
 			unformattedURL="${unformattedURL}/"
 		else
 			# Removes every slash mark from the end of the current url and then add one to the end.
-			unformattedURL="${unformattedURL%/?}/"
+			logTrace "The chapter name did not contain a period. Only one slash mark will be retained."
+
+			# This uses weird bash pattern-matching voodoo to set and remove the suffix for the unformattedURL, but it does this by setting a prefix that is everything in the string except the trailing slashes.
+			unformattedURL=${unformattedURL%"${unformattedURL##*[!/]}"}/;
 		fi
 
 		# TODO: Add a check to see if the whole file is less than 50 characters?
