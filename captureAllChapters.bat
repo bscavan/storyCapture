@@ -10,7 +10,6 @@ SET captureCommand=%gitBashPath% --login -i -- %captureChaptersScript%
 :: TODO: Make wait-time a variable?
 %captureCommand% --wait-time='86400' --id='/fiction/16946/azarinth-healer' --name='azarinth_healer'
 %captureCommand% --wait-time='86400' --id='/fiction/11209/the-legend-of-randidly-ghosthound' --name='randidly-ghosthound'
-%captureCommand% --wait-time='86400' --id='/fiction/10073/the-wandering-inn' --name='wanderingInn'
 %captureCommand% --wait-time='86400' --id='/fiction/36065/sylver-seeker' --name='SilverSeeker' 
 %captureCommand% --wait-time='86400' --id='/fiction/30396/ideascape-an-adventure-litrpg' --name='ideascape'
 %captureCommand% --wait-time='86400' --id='/fiction/15521/brian-the-drow-a-worldshapers-realmbreakers-litrpg' --name='brianTheDrow'
@@ -26,3 +25,4 @@ SET captureCommand=%gitBashPath% --login -i -- %captureChaptersScript%
 %captureCommand% --wait-time='86400' --id='/fiction/33020/blessed-time' --name='blessedTime'
 %captureCommand% --wait-time='86400' --id='/fiction/43182/rising-world' --name='risingWorld'
 %captureCommand% --wait-time='86400' --id='/fiction/43181/the-hedge-wizard' --name='hedgeWizard'
+%captureCommand% --wait-time='86400' --name='WanderingInn' --wandering-inn

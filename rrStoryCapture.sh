@@ -25,6 +25,22 @@ logFilePath=""
 # TODO: Convert the log method to append to a logging file instead!
 # TODO: Make the logging actually include useful details, like if new files were found or if the user specified all chapters should be re-downloaded.
 
+
+## If all else fails and you can't get anything beyond the TOC then use the following two commands inside a new directory specific to the story;
+# let chapter=1
+# for item in $(cat ../toc_working/final-latest); do curl "https://www.royalroad.com${item}"> ./chapter_${chapter}_$(basename $item).html; let chapter=$chapter+1; done
+	# This one preserves the chapter name. If you want to create volumes out of these you should instead use these:
+	# for item in $(cat ../toc_working/final-latest); do curl "https://www.royalroad.com${item}"> ./chapter_${chapter}.html; let chapter=$chapter+1; done
+	# ./rrStoryCapture.sh --id='<valueForId>' --name='<name>' --skip-chapters
+
+## If you find the above command saved your chapters with progressing numbers (0, 1, ... 10, ... 100) and they're sorted by their first digit, you can fix it with the following commands:
+# pattern="(chapter_)([0-9])(_.*)"
+# for file in $(ls .); do if [[ "$file" =~ $pattern ]]; then mv $file "${BASH_REMATCH[1]}00${BASH_REMATCH[2]}${BASH_REMATCH[3]}"; fi; done
+# pattern="(chapter_)([0-9][0-9])(_.*)"
+# for file in $(ls .); do if [[ "$file" =~ $pattern ]]; then mv $file "${BASH_REMATCH[1]}0${BASH_REMATCH[2]}${BASH_REMATCH[3]}"; fi; done
+
+# Note, if you change the files like this, while you'll get them sorted correctly in your directory, this script won't be able to handle them.
+
 ##### Helper functions: #####
 
 # TODO: make different versions of logging? One for info, one for debug, one for trace, etc.?
@@ -480,7 +496,6 @@ else
 		fi
 
 		# If the current url does not contain a period, ensure it ends in exactly one slash mark
-		#if [[ ! $unformattedURL =~ '/'$ ]] && [[ ! "$unformattedURL" == *"\."* ]]; then
 		if [[ "$(basename $unformattedURL)" == *"."* ]]; then
 			logTrace "Chapter URL contained a period. An additional slash mark will be added to the end."
 			unformattedURL="${unformattedURL}/"
@@ -496,6 +511,8 @@ else
 		# TODO: Try and extract the chapter name from the url?
 		# And do what with it?
 		if [[ $redownloadChapters = "false" ]] && [ -f $nextChapterName ]; then
+			# TODO: Check if the file is empty (it has a length of 0 bits). If so, delete it and try to redownload.
+			
 			# Echoing a blank line for clarity when logging...
 			logInfo "Chapter number ${index} already exists and is saved under the file name ${nextChapterName}. It will not be re-downloaded."
 		else
@@ -607,7 +624,14 @@ do
 		chaptersInThisFile=$chapterCountOfIncompleteVolume
 	fi
 	
-	file="./${storyName}chapters/chapter_${currentChapter}_*.html"
+	if [[ $wanderinginnMode = "false" ]]; then
+		file="./${storyName}chapters/chapter_${currentChapter}.html"
+		# TODO: Consider changing this to file="./${storyName}chapters/chapter_[0]?${currentChapter}.html" so it will ignore any number of leading zeros in the chapter number...
+	else
+		file="./${storyName}chapters/chapter_${currentChapter}_*.html"
+		# TODO: Consider changing this to file="./${storyName}chapters/chapter_[0]?${currentChapter}.html" so it will ignore any number of leading zeros in the chapter number...
+	fi
+
 	if (( $counter > $chaptersInThisVolume)); then
 		logInfo "While constructing volume number [${volumeNumber}], [${chaptersInThisVolume}] out of [${chaptersInThisVolume}] chapters were included. The volume will now be finalized and chapter number [${counter}] will be included in the next volume."
 
